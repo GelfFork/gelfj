@@ -42,6 +42,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
     private boolean addExtendedInformation;
     private boolean includeLocation = true;
     private Map<String, String> fields;
+    private boolean initialized = false;
 
     public GelfAppender() {
         super();
@@ -167,8 +168,10 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
         return null;
     }
 
-    @Override
-    public void activateOptions() {
+    private void init() {
+        if (initialized)
+            return;
+
         if (graylogHost == null && amqpURI == null) {
             errorHandler.error("Graylog2 hostname and amqp uri are empty!", null, ErrorCode.WRITE_FAILURE);
         } else if (graylogHost != null && amqpURI != null) {
@@ -200,6 +203,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
                 errorHandler.error("AMQP key exception", e, ErrorCode.WRITE_FAILURE);
             }
         }
+        initialized = true;
     }
 
     protected GelfUDPSender getGelfUDPSender(String udpGraylogHost, int graylogPort) throws IOException {
@@ -216,6 +220,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
 
     @Override
     protected void append(LoggingEvent event) {
+        init();
         GelfMessage gelfMessage = GelfMessageFactory.makeMessage(layout, event, this);
 
         if(getGelfSender() == null || !getGelfSender().sendMessage(gelfMessage)) {
