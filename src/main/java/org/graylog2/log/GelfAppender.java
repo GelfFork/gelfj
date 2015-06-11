@@ -46,6 +46,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
 
     public GelfAppender() {
         super();
+        init();
     }
 
     @SuppressWarnings("unchecked")
@@ -220,7 +221,6 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
 
     @Override
     protected void append(LoggingEvent event) {
-        init();
         GelfMessage gelfMessage = GelfMessageFactory.makeMessage(layout, event, this);
 
         if(getGelfSender() == null || !getGelfSender().sendMessage(gelfMessage)) {
