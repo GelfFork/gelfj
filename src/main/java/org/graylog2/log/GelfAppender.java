@@ -1,6 +1,7 @@
 package org.graylog2.log;
 
 import org.apache.log4j.AppenderSkeleton;
+import org.apache.log4j.Logger;
 import org.apache.log4j.spi.ErrorCode;
 import org.apache.log4j.spi.LoggingEvent;
 import org.graylog2.GelfMessage;
@@ -19,6 +20,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import org.graylog2.*;
 
@@ -28,6 +31,7 @@ import org.graylog2.*;
  * @author Jochen Schalanda
  */
 public class GelfAppender extends AppenderSkeleton implements GelfMessageProvider {
+    public static final int GELF_SENDER_INITIALIZE_ATTEMPT_INTERVAL = 10;
 
     private String graylogHost;
     private String amqpURI;
@@ -37,16 +41,30 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
     private static String originHost;
     private int graylogPort = 12201;
     private String facility;
-    private GelfSender gelfSender;
+    private volatile GelfSender gelfSender;
     private boolean extractStacktrace;
     private boolean addExtendedInformation;
     private boolean includeLocation = true;
     private Map<String, String> fields;
-    private boolean initialized = false;
+    private final Timer timer = new Timer();
 
     public GelfAppender() {
         super();
-        init();
+        timer.scheduleAtFixedRate(new GelfSenderInitializationTimerTask(), 500, GELF_SENDER_INITIALIZE_ATTEMPT_INTERVAL * 1000);
+    }
+
+    private class GelfSenderInitializationTimerTask extends TimerTask {
+        @Override
+        public void run() {
+            System.out.println("Invoking graylog GELF appender timer task");
+            if (getGelfSender() == null) {
+                System.out.println("Trying to initialize GELF sender");
+                if(initializeGelfSender()) {
+                    System.out.println("GELF sender has been successfully initialized");
+                    timer.cancel();
+                }
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -169,10 +187,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
         return null;
     }
 
-    private void init() {
-        if (initialized)
-            return;
-
+    private boolean initializeGelfSender() {
         if (graylogHost == null && amqpURI == null) {
             errorHandler.error("Graylog2 hostname and amqp uri are empty!", null, ErrorCode.WRITE_FAILURE);
         } else if (graylogHost != null && amqpURI != null) {
@@ -190,6 +205,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
                 } else {
                     gelfSender = getGelfUDPSender(graylogHost, graylogPort);
                 }
+                return gelfSender != null;
             } catch (UnknownHostException e) {
                 errorHandler.error("Unknown Graylog2 hostname:" + getGraylogHost(), e, ErrorCode.WRITE_FAILURE);
             } catch (SocketException e) {
@@ -204,7 +220,7 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
                 errorHandler.error("AMQP key exception", e, ErrorCode.WRITE_FAILURE);
             }
         }
-        initialized = true;
+        return false;
     }
 
     protected GelfUDPSender getGelfUDPSender(String udpGraylogHost, int graylogPort) throws IOException {
@@ -221,10 +237,11 @@ public class GelfAppender extends AppenderSkeleton implements GelfMessageProvide
 
     @Override
     protected void append(LoggingEvent event) {
-        GelfMessage gelfMessage = GelfMessageFactory.makeMessage(layout, event, this);
-
-        if(getGelfSender() == null || !getGelfSender().sendMessage(gelfMessage)) {
-            errorHandler.error("Could not send GELF message");
+        if (getGelfSender() != null) {
+            GelfMessage gelfMessage = GelfMessageFactory.makeMessage(layout, event, this);
+            if(!getGelfSender().sendMessage(gelfMessage)) {
+                errorHandler.error("Could not send GELF message");
+            }
         }
     }
 
